@@ -91,3 +91,68 @@ def edit_file(file_path, old_content, new_content):
     except Exception as e:
         output.append(f"[Error: {e}]")
     return "\n".join(output)
+
+def grep(root_dir, search_term, ext_filter=None):
+    
+    IGNORE_LIST = {
+        '.git', 'node_modules', '__pycache__', '.venv', 'venv', 
+        '.DS_Store', 'dist', 'build', '.idea', '.vscode',
+    }
+    BINARY_EXTENSIONS = {
+        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.pdf',
+        '.zip', '.tar', '.gz', '.7z', '.rar', '.mp3', '.mp4',
+        '.pyc', '.exe', '.dll', '.so', '.dylib', '.db', '.sqlite'
+    }
+    results = []
+    total_matches = 0
+    
+    if ext_filter and not ext_filter.startswith('.'):
+        ext_filter = '.' + ext_filter.lower()
+
+    for current_root, dirs, files in os.walk(root_dir):
+        dirs[:] = [d for d in dirs if d not in IGNORE_LIST]
+        
+        for file_name in files:
+            if file_name in IGNORE_LIST:
+                continue
+            
+            file_path = os.path.join(current_root, file_name)
+            _, ext = os.path.splitext(file_name.lower())
+
+            if ext_filter and ext != ext_filter:
+                continue
+
+            if ext in BINARY_EXTENSIONS:
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    # errors='ignore' helps skip hidden binary characters without throwing a crash
+                    
+                    for line_num, line in enumerate(f, start=1):
+                        if search_term in line:
+                            clean_line = line.strip()
+                
+                            results.append({
+                                'file': os.path.relpath(file_path, root_dir),
+                                'line': line_num,
+                                'text': clean_line
+                            })
+                            total_matches += 1
+                            
+            except (PermissionError, FileNotFoundError):
+                continue
+    if not results:
+        return f"No matches found for '{search_term}' in directory: {root_dir}"
+        
+    output_lines = [
+        f"Search Results for '{search_term}'",
+        f"Total Matches Found: {total_matches}",
+        "-" * 60
+    ]
+    
+    for match in results:
+        output_lines.append(f"File: {match['file']} (Line {match['line']})")
+        output_lines.append(f"Match: {match['text']}\n")
+        
+    return "\n".join(output_lines)
