@@ -1,7 +1,7 @@
 [project]
-name = "claudecodeminiclone"
+name = "Agent-J"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI coding agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
