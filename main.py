@@ -1,32 +1,32 @@
 import os
 import json
+import time
 import asyncio
+import inspect
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
-from typing import TypedDict
+from openai import AsyncOpenAI, RateLimitError
 from sys_prompts import system_prompt
-from tools import (search_web, read_file,
-                   list_directory, write_file,
-                   edit_file, grep)
-from tool_schemas import (search_web_schema, read_file_schema,
-                          list_dirctory_schema, write_file_schema,
-                          edit_file_schema, grep_schema)
+from tools import TOOLS
+from tool_schemas import tool_schema
 
 load_dotenv()
 
-fol = [] # 'fol' stands for FinalOutputlog, making this now for future ReACT usecases.
-
 client = AsyncOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    api_key=os.getenv("GOOGLE_API_KEY")
   )
 
-tool_schema = [search_web_schema, read_file_schema,
-               list_dirctory_schema, write_file_schema,
-               edit_file_schema, grep_schema
-               ]
+async def execute_tool(tool_name, args):
+    tool_func = TOOLS[tool_name]
+
+    if inspect.iscoroutinefunction(tool_func):
+        return await tool_func(**args)
+
+    return tool_func(**args)
+
 
 async def main(user_input):
+    MAX_ITERATIONS = 50
     messages = [
         {
             "role": "system",
@@ -38,130 +38,101 @@ async def main(user_input):
         }
     ]
 
-    stream = await client.chat.completions.create(
-      model="nex-agi/nex-n2-pro:free",
-      messages=messages,
-      tools=tool_schema,
-      tool_choice='auto',
-      stream=True,
-      extra_body={"reasoning": {"enabled": True}}
-    )
+    for iteration in range(MAX_ITERATIONS):
 
-    tool_call_detected = False
-    tool_name = ""
-    tool_arguments_stream = ""
-  
-    async for chunk in stream:
-        if chunk.choices:
-            content = chunk.choices[0].delta.content
-        if content:
-            print(content, end="", flush=True)
-            
-        tool_calls = chunk.choices[0].delta.tool_calls
-        if tool_calls:
-            tool_call_detected = True
-            delta_tool = tool_calls[0]
+        print(f"\n--- Iteration {iteration+1} ---")
 
-            if delta_tool.function.name:
-                tool_name += delta_tool.function.name
-            if delta_tool.function.arguments:
-                tool_arguments_stream += delta_tool.function.arguments
-                print(".", end="", flush=True)
+        tool_calls_accumulator = {}
 
-    if tool_call_detected:
-        print(f"\n\n[Tool Triggered]: Model requested function '{tool_name}'")
-    try:
-        parsed_args = json.loads(tool_arguments_stream)
+        try:
+            stream = await client.chat.completions.create(
+                model="gemini-2.5-flash",
+                messages=messages,
+                tools=tool_schema,
+                tool_choice="auto",
+                stream=True,
+                #extra_body={"reasoning": {"enabled": True}}
+            )
 
-        if tool_name == "search_web":
-            search_web_arg = parsed_args.get("query", "")
-            print(f"[Tool Executing]: '{tool_name}' → \"{search_web_arg}\"")
-        elif tool_name == "read_file":
-            read_file_arg = parsed_args.get("file_path", "")
-            print(f"[Tool Executing]: '{tool_name}' → \"{read_file_arg}\"")
-        elif tool_name == "list_directory":
-            list_directory_arg = parsed_args.get("dir_path", "")
-            print(f"[Tool Executing]: '{tool_name}' → \"{list_directory_arg}\"")
-        elif tool_name == "write_file":
-            write_file_path = parsed_args.get("file_path", "")
-            write_file_content = parsed_args.get("content", "")
-            print(f"[Tool Executing]: '{tool_name}' → \"{write_file_path}\"")
-        elif tool_name == 'edit_file':
-            edit_file_path = parsed_args.get("file_path", "")
-            edit_file_old_content = parsed_args.get("old_content", "")
-            edit_file_new_content = parsed_args.get("new_content", "")
-            print(f"[Tool Executing]: '{tool_name}' → File Path: \"{edit_file_path}\"")
-        elif tool_name == 'grep':
-            grep_root_dir = parsed_args.get("root_dir", "")
-            grep_search_term = parsed_args.get("search_term", "")
-            print(f"[Tool Executing]: '{tool_name}' → Root Directory:\"{grep_root_dir}\"\nSearch Term: \"{grep_search_term}\"")
-            
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                
+                delta = chunk.choices[0].delta
 
-        tools_result = []
-        if tool_name == "search_web":
-            search_web_result = await search_web(search_web_arg)
-            tools_result.append({tool_name: search_web_result})
-        elif tool_name == "read_file":
-            read_file_result = read_file(read_file_arg)
-            tools_result.append({tool_name: read_file_result})
-        elif tool_name == "list_directory":
-            list_directory_result = list_directory(list_directory_arg) 
-            tools_result.append({tool_name: list_directory_result})
-        elif tool_name == "write_file":
-            write_file_result = write_file(write_file_path, write_file_content)
-            tools_result.append({tool_name: write_file_result})
-        elif tool_name == "edit_file":
-            edit_file_result = edit_file(edit_file_path, edit_file_old_content, edit_file_new_content)
-            tools_result.append({tool_name: edit_file_result})
-        elif tool_name == "grep":
-            grep_result = grep(grep_root_dir, grep_search_term)
-            tools_result.append({tool_name: grep_result})
+                if delta.content:
+                    print(delta.content, end="", flush=True)
 
-        call_id = "call_" + os.urandom(4).hex()
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
 
-        messages.append({
-              "role": "assistant", 
-              "content": "", 
-              "tool_calls": [{
-                  "id": call_id, 
-                  "type": "function",
-                  "function": {"name": tool_name, "arguments": tool_arguments_stream}
-              }]
-          })
-        messages.append({
-              "role": "tool", 
-              "tool_call_id": call_id, 
-              "name": tool_name, 
-              "content": json.dumps(tools_result[0])
-              })
+                        idx = tc.index
 
-        messages.append({
-                "role": "system",
-                "content": "Answer the user's question directly using the context data given above."
-            })
+                        if idx not in tool_calls_accumulator:
 
-        print("[System]: Sending context back to model for final answer...\n")
-        final_stream = await client.chat.completions.create(
-            model="openai/gpt-oss-120b:free",
-            messages=messages,
-            stream=True,
-            extra_body={"reasoning": {"enabled": True}})
-          
-        async for chunk in final_stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                print(chunk.choices[0].delta.content, end="", flush=True)
-                 
-    except json.JSONDecodeError:
-        print("\n[Error]: Failed to parse tool argument strings from model.")
-          
-    print()
+                            tool_calls_accumulator[idx] = {
+                                "id": "",
+                                "name": "",
+                                "arguments": ""
+                            }
 
-#This is for future usecases.
-class AgentState(TypedDict):
-    messages: list
-    retry_count: int
-    current_step: str
-    workspace: str
+                        if tc.id:
+                            tool_calls_accumulator[idx]["id"] += tc.id
+
+                        if tc.function.name:
+                            tool_calls_accumulator[idx]["name"] += tc.function.name
+
+                        if tc.function.arguments:
+                            tool_calls_accumulator[idx]["arguments"] += tc.function.arguments
+        
+        except RateLimitError as e:
+            print("[Hit Rate Limit]: Staring in a moment...")
+            time.sleep(36)
+            asyncio.run(main(user_input=messages))
+
+        except Exception as e:
+            print(f"\n[Model Error]: {e}")
+            return
+        
+        if not tool_calls_accumulator:
+            print("\n\n[Agent Finished]")
+            break
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": tool["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tool["name"],
+                            "arguments": tool["arguments"]
+                        }
+                    }
+                    for tool in tool_calls_accumulator.values()
+                ]
+            }
+        )
+        for tool in tool_calls_accumulator.values():
+            print(f"\n[Executing Tool] {tool['name']}")
+
+            try:
+                args = json.loads(tool["arguments"])
+                result = await execute_tool(tool["name"], args)
+            except Exception as e:
+                result = {"error": str(e)}
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool["id"],
+                    "content": json.dumps(result)
+                }
+            )
+    
+    else:
+        print("\n[Max iterations reached]")
 
 if __name__ == "__main__":
     user_input = input("Enter a prompt:  ")
