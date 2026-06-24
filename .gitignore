@@ -8,6 +8,8 @@ wheels/
 .python-version
 .gitignore
 test.txt
+.env
+poke.py
 
 # Virtual environments
 .venv
