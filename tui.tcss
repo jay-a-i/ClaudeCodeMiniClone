@@ -1,0 +1,56 @@
+Screen {
+    background: $surface;
+}
+#main-container {
+    align: center middle; /* Vertically and horizontally centers the splash content */
+    height: 100%;
+    width: 100%;
+}   
+#console-box {
+    width: 65;
+    height: 11;
+    border: thick $success;
+    background: $boost;
+    padding: 1 2;
+    margin: 1 2; 
+}
+#agent-title {
+    color: $success;
+    text-style: bold;
+    width: 100%;
+}
+#tagline {
+    color: $text-muted;
+    text-style: italic;
+    content-align: center middle; 
+    margin-top: 1;
+}
+#prompt-line {
+    color: $accent;
+    text-style: blink bold;
+    content-align: center middle;
+    margin-top: 2;
+}   
+#chat_history {
+    height: 1fr;         
+    border: solid $accent;
+    padding: 1 2;
+    margin: 1 2 0 2; /* clean margin frames */
+}
+.user-msg {
+    color: $primary;
+    text-style: bold;
+    margin: 1 0;
+    padding-left: 1;
+}
+.agent-msg {
+    color: $text;
+    background: $boost;
+    padding: 1 2;
+    margin-bottom: 1;
+    border-left: solid $success;
+}
+Input {
+    margin: 0 2 1 2;
+    border: solid $primary;
+}
